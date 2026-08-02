@@ -1,6 +1,6 @@
 {
   "name": "android-sqlite-mcp",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "",
   "main": "build/index.js",
   "bin": {
@@ -27,12 +27,12 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/felicks/android-sqlite-mcp.git"
+    "url": "git+https://github.com/Feliicks/android-sqlite-mcp.git"
   },
   "bugs": {
-    "url": "https://github.com/felicks/android-sqlite-mcp/issues"
+    "url": "https://github.com/Feliicks/android-sqlite-mcp/issues"
   },
-  "homepage": "https://github.com/felicks/android-sqlite-mcp#readme",
+  "homepage": "https://github.com/Feliicks/android-sqlite-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
     "better-sqlite3": "^13.0.2"
