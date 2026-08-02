@@ -1,0 +1,37 @@
+{
+  "name": "android-sqlite-mcp",
+  "version": "1.0.0",
+  "description": "",
+  "main": "build/index.js",
+  "bin": {
+    "android-sqlite-mcp": "./build/index.js"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "files": [
+    "build"
+  ],
+  "keywords": [
+    "mcp",
+    "android",
+    "sqlite",
+    "ai",
+    "claude",
+    "cursor"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "better-sqlite3": "^13.0.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.1.2",
+    "typescript": "^7.0.2"
+  }
+}
