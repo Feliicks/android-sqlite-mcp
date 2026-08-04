@@ -9,6 +9,16 @@ import {
 import { CacheManager } from "./CacheManager.js";
 import { AdbManager } from "./AdbManager.js";
 import { DatabaseManager } from "./DatabaseManager.js";
+import { logger } from "./logger.js";
+
+// Global Error Handlers
+process.on('uncaughtException', (error) => {
+  logger.fatal({ err: error }, 'Uncaught Exception in MCP Server');
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.fatal({ reason, promise }, 'Unhandled Rejection in MCP Server');
+});
 
 const cacheManager = new CacheManager();
 const adbManager = new AdbManager();
@@ -227,6 +237,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         throw new Error(`Unknown tool: ${name}`);
     }
   } catch (error: any) {
+    logger.error({ err: error, tool: name, args }, `Error executing tool ${name}`);
     return {
       content: [
         {
@@ -243,10 +254,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error("Android SQLite MCP Server running on stdio");
+  logger.info("Android SQLite MCP Server running on stdio");
 }
 
 main().catch((error) => {
-  console.error("Fatal error:", error);
+  logger.fatal({ err: error }, "Fatal startup error");
   process.exit(1);
 });

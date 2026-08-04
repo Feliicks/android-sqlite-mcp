@@ -35,11 +35,14 @@
   "homepage": "https://github.com/Feliicks/android-sqlite-mcp#readme",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.30.0",
-    "better-sqlite3": "^13.0.2"
+    "better-sqlite3": "^13.0.2",
+    "pino": "^10.3.1",
+    "pino-roll": "^4.0.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.1.2",
+    "@types/pino": "^7.0.4",
     "typescript": "^7.0.2"
   }
 }

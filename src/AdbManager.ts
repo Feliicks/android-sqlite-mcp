@@ -1,6 +1,7 @@
 import { exec } from 'child_process';
 import { promisify } from 'util';
 import fs from 'fs';
+import { logger } from './logger.js';
 
 const execAsync = promisify(exec);
 
@@ -44,7 +45,7 @@ export class AdbManager {
       }
       return true;
     } catch (error: any) {
-      console.warn(`Failed to pull ${remoteFileName}: ${error.message}`);
+      logger.warn({ err: error, appId, remoteFileName }, `Failed to pull ${remoteFileName}`);
       return false;
     }
   }

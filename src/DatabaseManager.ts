@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { logger } from './logger.js';
 
 export class DatabaseManager {
   /**
@@ -30,8 +31,8 @@ export class DatabaseManager {
             const countStmt = db.prepare(`SELECT COUNT(*) as count FROM "${table.name}"`);
             const row = countStmt.get() as { count: number };
             rowCount = row.count;
-          } catch (e) {
-            // Ignore error if we can't count rows
+          } catch (e: any) {
+            logger.warn({ err: e, table: table.name }, 'Failed to count rows');
           }
         }
         return {
@@ -97,6 +98,9 @@ export class DatabaseManager {
           rows,
         };
       }
+    } catch (e: any) {
+      logger.error({ err: e, query, params }, 'Failed to execute query');
+      throw e;
     } finally {
       db.close();
     }
