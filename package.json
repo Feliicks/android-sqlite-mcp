@@ -1,7 +1,7 @@
 {
   "name": "android-sqlite-mcp",
-  "version": "1.0.2",
-  "description": "",
+  "version": "1.0.4",
+  "description": "A Model Context Protocol (MCP) server to connect AI agents directly to the embedded SQLite/Room databases of your Android applications.",
   "main": "build/index.js",
   "bin": {
     "android-sqlite-mcp": "./build/index.js"
