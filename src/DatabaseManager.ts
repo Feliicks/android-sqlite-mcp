@@ -2,11 +2,21 @@ import Database from 'better-sqlite3';
 import { logger } from './logger.js';
 
 export class DatabaseManager {
+  public prepareSnapshot(dbPath: string) {
+    const db = this.getDb(dbPath, false);
+    try {
+      if (db.pragma('quick_check', { simple: true }) !== 'ok') throw new Error('InvalidDatabase: integrity check failed');
+      const checkpoint = db.pragma('wal_checkpoint(TRUNCATE)') as { busy: number }[];
+      if (checkpoint.some(row => row.busy)) throw new Error('DatabaseBusy: snapshot checkpoint failed');
+      db.pragma('journal_mode = DELETE');
+    } finally { db.close(); }
+    return true;
+  }
   /**
    * Helper to open a database connection in readonly mode by default
    */
   private getDb(dbPath: string, readonly = true): Database.Database {
-    return new Database(dbPath, { readonly });
+    return new Database(dbPath, { readonly, fileMustExist: true, timeout: 1000 });
   }
 
   /**
@@ -28,7 +38,7 @@ export class DatabaseManager {
         let rowCount = 0;
         if (table.type === 'table') {
           try {
-            const countStmt = db.prepare(`SELECT COUNT(*) as count FROM "${table.name}"`);
+            const countStmt = db.prepare(`SELECT COUNT(*) as count FROM "${table.name.replace(/"/g, '""')}"`);
             const row = countStmt.get() as { count: number };
             rowCount = row.count;
           } catch (e: any) {
@@ -77,13 +87,12 @@ export class DatabaseManager {
    * If it's a SELECT, it will return the rows.
    */
   public executeQuery(dbPath: string, query: string, params: any[] = []) {
-    // Determine if the query is a write operation
-    const isWrite = /^\s*(INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|REPLACE)\b/i.test(query);
-    const db = this.getDb(dbPath, !isWrite);
+    // SQLite classifies statements (including CTEs, comments and RETURNING).
+    const db = this.getDb(dbPath, false);
 
     try {
       const stmt = db.prepare(query);
-      if (isWrite) {
+      if (!stmt.reader) {
         const result = stmt.run(...params);
         return {
           type: 'write',
@@ -91,15 +100,23 @@ export class DatabaseManager {
           lastInsertRowid: result.lastInsertRowid.toString(),
         };
       } else {
-        const rows = stmt.all(...params);
+        const rows: unknown[] = [];
+        let truncated = false;
+        let bytes = 0;
+        for (const row of stmt.iterate(...params)) {
+          bytes += Buffer.byteLength(JSON.stringify(row));
+          if (rows.length >= 1000 || bytes > 1024 * 1024) { truncated = true; break; }
+          rows.push(row);
+        }
         return {
           type: 'read',
+          truncated,
           rowCount: rows.length,
           rows,
         };
       }
     } catch (e: any) {
-      logger.error({ err: e, query, params }, 'Failed to execute query');
+      logger.error({ err: e }, 'Failed to execute query');
       throw e;
     } finally {
       db.close();

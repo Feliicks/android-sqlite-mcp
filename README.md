@@ -57,6 +57,41 @@ Add the server by editing the <code>mcp_settings.json</code> file in your global
 ```
 </details>
 
+### Local development and stability
+
+Requires Node.js 22.15 or newer. Run `npm test` to compile and run regression tests.
+To test this checkout (instead of the published npm package), build with `npm run build`
+and configure the MCP entry with an absolute path:
+
+```json
+{
+  "command": "node",
+  "args": ["D:\\android-mcp\\build\\index.js"]
+}
+```
+
+Tool arguments use `appId` and `dbName`. Legacy `package_name` is accepted as an
+alias for `appId`; conflicting values are rejected. Queries operate on the local
+cache only and never push writes back to Android. Results are capped at 1000 rows
+and 1 MiB; `truncated` indicates omitted rows. SQLite operations run in a separate
+process with a 15 second timeout and request cancellation. A timed-out write may
+already have committed; inspect the cache before retrying writes.
+
+ADB commands have a 15 second timeout. Set `ANDROID_SERIAL` when multiple devices
+are connected. Use separate `ANDROID_MCP_CACHE_DIR` values for different devices;
+new extractions record the device and reject replacing a cache from another device.
+Older caches have no device identity until their first successful new extraction.
+`ANDROID_MCP_LOG_DIR` optionally overrides the file log directory.
+
+Extraction compares two consecutive copies of the DB and WAL and rejects detected
+changes, then recovers/checks the snapshot in a temporary directory before publishing.
+Stop app writes for a reliable snapshot: comparison cannot guarantee a transactionally
+consistent snapshot of an actively changing Android database. Existing local SQLite
+sidecars cause `CacheConflict` rather than being mixed with a new copy; close other
+readers and use a fresh cache directory. Concurrent cache operations fail with
+`DatabaseBusy`. If a server is forcibly killed, a `.mcp-lock` file may remain; remove
+it only after verifying no process still uses that cached database.
+
 <details>
 <summary><b>2. Claude Code (CLI)</b></summary>
 <br>

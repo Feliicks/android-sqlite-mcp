@@ -1,128 +1,73 @@
-import { exec } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
-import { logger } from './logger.js';
-
-const execAsync = promisify(exec);
-
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import fs from 'node:fs';
+import path from 'node:path';
+import { databaseOperation } from './operations.js';
+import { appId as validateAppId, dbName as validateDbName } from './validation.js';
+const execute = promisify(execFile);
+const quote = (value: string) => "'" + value.replace(/'/g, "'\\''") + "'";
 export class AdbManager {
-  /**
-   * Helper to execute adb commands and return stdout.
-   */
-  private async executeAdb(command: string): Promise<string> {
+  private active = new AbortController();
+  cancel() { this.active.abort(); }
+  private async adb(args: string[], signal?: AbortSignal): Promise<Buffer> {
     try {
-      const { stdout } = await execAsync(`adb ${command}`, { encoding: 'buffer' });
-      return stdout.toString('utf-8').trim();
+      const { stdout } = await execute('adb', args, { encoding: 'buffer', timeout: 15000, maxBuffer: 128 * 1024 * 1024, windowsHide: true, signal: AbortSignal.any([this.active.signal, ...(signal ? [signal] : [])]) });
+      return stdout;
     } catch (error: any) {
-      throw new Error(`ADB Error: ${error.message}`);
+      const message = error.message ?? String(error);
+      const code = /offline/i.test(message) ? 'DeviceOffline' : /unauthorized/i.test(message) ? 'DeviceUnauthorized' : /more than one/i.test(message) ? 'MultipleDevices' : /no devices|ENOENT/i.test(message) ? 'DeviceUnavailable' : error.killed ? 'ADBTimeout' : 'ADBError';
+      throw new Error(code + ': ' + message);
     }
   }
-
-  /**
-   * Pulls a file from the app's internal databases directory using run-as and exec-out.
-   * We use exec-out to avoid \r\n corruption on binary files.
-   */
-  private async pullFile(appId: string, remoteFileName: string, localPath: string): Promise<boolean> {
-    try {
-      // Check if file exists first to avoid creating empty corrupted files
-      const checkCmd = `adb shell "run-as ${appId} ls databases/${remoteFileName}"`;
-      try {
-        await execAsync(checkCmd);
-      } catch (e) {
-        // File does not exist
-        return false;
-      }
-
-      // Pull the binary file safely using exec-out
-      const pullCmd = `adb exec-out "run-as ${appId} cat databases/${remoteFileName}" > "${localPath}"`;
-      await execAsync(pullCmd, { encoding: 'buffer' });
-      
-      // Verify the file was written and is not completely empty (unless it was legitimately empty, but DB files aren't)
-      const stats = fs.statSync(localPath);
-      if (stats.size === 0) {
-        fs.unlinkSync(localPath);
-        return false;
-      }
-      return true;
-    } catch (error: any) {
-      logger.warn({ err: error, appId, remoteFileName }, `Failed to pull ${remoteFileName}`);
-      return false;
-    }
+  private async device(signal?: AbortSignal): Promise<string[]> {
+    const output = (await this.adb(['devices'], signal)).toString();
+    const devices = output.split(/\r?\n/).map(line => line.match(/^(\S+)\s+(device|offline|unauthorized)\b/)).filter(Boolean) as RegExpMatchArray[];
+    const selected = process.env.ANDROID_SERIAL;
+    if (!selected && devices.length > 1) throw new Error('MultipleDevices: set ANDROID_SERIAL to select a device');
+    const device = selected ? devices.find(d => d[1] === selected) : devices[0];
+    if (!device) throw new Error('DeviceUnavailable: no selected Android device connected');
+    if (device[2] !== 'device') throw new Error('DeviceUnavailable: ' + device[1] + ' is ' + device[2]);
+    return ['-s', device[1]];
   }
-
-  /**
-   * Pulls the database and its WAL files to the local cache.
-   */
-  public async pullDatabase(
-    appId: string,
-    dbName: string,
-    paths: { main: string; wal: string; shm: string }
-  ): Promise<{ main: boolean; wal: boolean; shm: boolean }> {
-    const mainSuccess = await this.pullFile(appId, dbName, paths.main);
-    
-    if (!mainSuccess) {
-      throw new Error(`Failed to extract main database file: ${dbName} from app: ${appId}. Are you sure the app is debuggable and the database exists?`);
-    }
-
-    // Attempt to pull WAL and SHM, but don't fail if they don't exist
-    const walSuccess = await this.pullFile(appId, `${dbName}-wal`, paths.wal);
-    const shmSuccess = await this.pullFile(appId, `${dbName}-shm`, paths.shm);
-
-    return {
-      main: mainSuccess,
-      wal: walSuccess,
-      shm: shmSuccess,
+  async listPackages(query?: string, signal?: AbortSignal): Promise<string[]> {
+    if (query !== undefined && typeof query !== 'string') throw new Error('InvalidParams: query must be a string');
+    const target = await this.device(signal);
+    return (await this.adb([...target, 'shell', 'pm list packages'], signal)).toString().split(/\r?\n/).filter(line => line.startsWith('package:')).map(line => line.slice(8).trim()).filter(pkg => !query || pkg.toLowerCase().includes(query.toLowerCase()));
+  }
+  async listDatabases(appId: string, signal?: AbortSignal): Promise<string[]> {
+    appId = validateAppId(appId);
+    const target = await this.device(signal);
+    try {
+      const output = (await this.adb([...target, 'shell', 'run-as ' + quote(appId) + ' ls -1 databases'], signal)).toString();
+      return output.split(/\r?\n/).filter(file => file && !/-(wal|shm|journal)$/.test(file));
+    } catch (error: any) { if (error.message.includes('No such file or directory')) return []; throw error; }
+  }
+  async pullDatabase(appId: string, dbName: string, paths: { main: string; wal: string; shm: string }, signal?: AbortSignal) {
+    appId = validateAppId(appId); dbName = validateDbName(dbName);
+    const target = await this.device(signal);
+    const identity = paths.main + '.mcp-device';
+    if (fs.existsSync(identity) && fs.readFileSync(identity, 'utf8') !== target[1]) throw new Error('CacheConflict: cached database belongs to another device; use a different ANDROID_MCP_CACHE_DIR');
+    const temp = fs.mkdtempSync(path.join(path.dirname(paths.main), '.extract-'));
+    const read = async (suffix: string): Promise<Buffer | null> => {
+      try { return await this.adb([...target, 'exec-out', 'run-as ' + quote(appId) + ' cat ' + quote('databases/' + dbName + suffix)], signal); }
+      catch (error: any) { if (suffix && error.message.includes('No such file or directory')) return null; throw error; }
     };
-  }
-
-  /**
-   * Lists all available database files for a specific application.
-   */
-  public async listDatabases(appId: string): Promise<string[]> {
     try {
-      const cmd = `adb shell "run-as ${appId} ls databases"`;
-      const output = await this.executeAdb(`shell "run-as ${appId} ls databases"`);
-      
-      // Parse output: split by whitespace, filter out WAL, SHM, and system files like journal
-      const files = output.split(/\s+/).filter(file => file.trim().length > 0);
-      
-      const dbNames = new Set<string>();
-      for (const file of files) {
-        if (file.endsWith('-wal')) dbNames.add(file.replace('-wal', ''));
-        else if (file.endsWith('-shm')) dbNames.add(file.replace('-shm', ''));
-        else if (!file.endsWith('-journal')) dbNames.add(file);
+      const main = await read(''); const wal = await read('-wal');
+      const again = await read(''); const walAgain = await read('-wal');
+      if (!main?.length || !again?.equals(main) || (wal === null ? walAgain !== null : !walAgain?.equals(wal))) throw new Error('DatabaseBusy: database changed during extraction; stop app writes and retry');
+      const staged = path.join(temp, 'snapshot.db');
+      fs.writeFileSync(staged, main);
+      if (wal?.length) fs.writeFileSync(staged + '-wal', wal);
+      await databaseOperation('prepareSnapshot', [staged], AbortSignal.any([this.active.signal, ...(signal ? [signal] : [])]));
+      signal?.throwIfAborted(); this.active.signal.throwIfAborted();
+      // Existing sidecars are removed while the per-database process lock is held.
+      for (const sidecar of [paths.wal, paths.shm, paths.main + '-journal']) {
+        if (fs.existsSync(sidecar)) throw new Error('CacheConflict: existing SQLite sidecars; close other readers and clear this cached database before extracting again');
       }
-      
-      return Array.from(dbNames);
-    } catch (error: any) {
-      // If the directory doesn't exist or app doesn't have databases
-      if (error.message.includes('No such file or directory')) {
-        return [];
-      }
-      throw error;
-    }
-  }
-
-  /**
-   * Lists installed application packages, optionally filtered by a query string.
-   */
-  public async listPackages(query?: string): Promise<string[]> {
-    try {
-      const output = await this.executeAdb(`shell pm list packages`);
-      
-      const packages = output
-        .split('\n')
-        .map(line => line.trim().replace('package:', ''))
-        .filter(pkg => pkg.length > 0);
-
-      if (query) {
-        const lowerQuery = query.toLowerCase();
-        return packages.filter(pkg => pkg.toLowerCase().includes(lowerQuery));
-      }
-      
-      return packages;
-    } catch (error: any) {
-      throw error;
-    }
+      fs.renameSync(staged, paths.main);
+      fs.writeFileSync(identity, target[1]);
+      return { main: true, wal: !!wal?.length, shm: false };
+    } finally { fs.rmSync(temp, { recursive: true, force: true }); }
   }
 }

@@ -3,7 +3,7 @@ import path from 'path';
 import os from 'os';
 import fs from 'fs';
 
-const logDir = path.join(os.homedir(), '.android-sqlite-mcp', 'logs');
+const logDir = process.env.ANDROID_MCP_LOG_DIR || path.join(os.homedir(), '.android-sqlite-mcp', 'logs');
 
 if (!fs.existsSync(logDir)) {
   fs.mkdirSync(logDir, { recursive: true });
