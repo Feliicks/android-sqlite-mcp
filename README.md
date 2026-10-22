@@ -59,6 +59,16 @@ Add the server by editing the <code>mcp_settings.json</code> file in your global
 
 ### Local development and stability
 
+`package.json` is the source of truth for the server version. To bump the patch
+version and synchronize `package-lock.json`, run:
+
+```sh
+npm version patch --no-git-tag-version
+```
+
+Use `minor` or `major` instead of `patch` when appropriate. The MCP server reads
+the version directly from its installed `package.json`; no source edit is needed.
+
 Requires Node.js 22.15 or newer. Run `npm test` to compile and run regression tests.
 To test this checkout (instead of the published npm package), build with `npm run build`
 and configure the MCP entry with an absolute path:

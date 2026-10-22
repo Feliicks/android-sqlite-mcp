@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from "node:module";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -11,6 +12,8 @@ import { AdbManager } from "./AdbManager.js";
 import { normalizeArguments } from "./validation.js";
 import { databaseOperation, withDatabaseLock } from "./operations.js";
 import { logger } from "./logger.js";
+
+const { version } = createRequire(import.meta.url)("../package.json") as { version: string };
 
 const shutdownController = new AbortController();
 let shuttingDown = false;
@@ -33,7 +36,7 @@ const adbManager = new AdbManager();
 const server = new Server(
   {
     name: "android-sqlite-mcp",
-    version: "1.0.0",
+    version,
   },
   {
     capabilities: {
